@@ -1,0 +1,54 @@
+{
+  "name": "n8n-nodes-truthscan",
+  "version": "0.1.0",
+  "description": "n8n community node for Truthscan AI detection. Detect AI-generated text (image, video, and audio detection coming soon).",
+  "license": "MIT",
+  "homepage": "https://truthscan.com",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "truthscan",
+    "ai-detection",
+    "ai-text-detector"
+  ],
+  "author": {
+    "name": "Truthscan",
+    "email": "support@truthscan.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/truthscan/n8n-nodes-truthscan.git"
+  },
+  "scripts": {
+    "build": "n8n-node build",
+    "build:watch": "tsc --watch",
+    "dev": "n8n-node dev",
+    "lint": "n8n-node lint",
+    "lint:fix": "n8n-node lint --fix",
+    "release": "n8n-node release",
+    "prepublishOnly": "n8n-node prerelease"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": true,
+    "credentials": [
+      "dist/credentials/TruthscanApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Truthscan/Truthscan.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@n8n/node-cli": "*",
+    "eslint": "9.29.0",
+    "prettier": "3.8.3",
+    "release-it": "20.2.0",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}

@@ -1,0 +1,13 @@
+.github
+.vscode
+node_modules
+*.ts
+!*.d.ts
+tsconfig.json
+eslint.config.mjs
+.eslintrc.js
+.prettierrc.js
+.gitignore
+.editorconfig
+nodes/**/*.ts
+credentials/**/*.ts
