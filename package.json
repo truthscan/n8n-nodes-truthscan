@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-truthscan",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "n8n community node for Truthscan AI detection. Detect AI-generated text (image, video, and audio detection coming soon).",
   "license": "MIT",
   "homepage": "https://truthscan.com",

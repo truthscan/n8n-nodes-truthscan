@@ -67,7 +67,7 @@ export const textFields: INodeProperties[] = [
 		type: 'boolean',
 		default: false,
 		description:
-			'Whether to run a deep AI analysis (agreement, confidence, key indicators, reasoning). Adds processing time.',
+			'Whether to run a deep AI analysis (agreement, confidence, key indicators, reasoning). When enabled, the node keeps polling until the analysis finishes, so it adds processing time.',
 		displayOptions: {
 			show: {
 				resource: ['text'],
@@ -118,14 +118,6 @@ export const textFields: INodeProperties[] = [
 				typeOptions: { minValue: 0 },
 				default: 0,
 				description: 'Number of retries if processing fails',
-			},
-			{
-				displayName: 'Wait for Analysis',
-				name: 'waitForAnalysis',
-				type: 'boolean',
-				default: false,
-				description:
-					'Whether to keep polling until the deep analysis finishes. Only relevant when Generate Analysis Details is enabled.',
 			},
 		],
 	},

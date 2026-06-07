@@ -46,24 +46,23 @@ Add the **Truthscan** node, choose a resource and the **Detect** operation. For 
 
 ### Text options
 
-- **Generate Analysis Details** - run a deep AI analysis (agreement, confidence, key indicators, reasoning, linguistic patterns, recommendations).
+- **Generate Analysis Details** - run a deep AI analysis (agreement, confidence, key indicators, reasoning, linguistic patterns, recommendations). When enabled, the node automatically keeps polling until the analysis finishes, so the result includes `analysis_results`.
 - **Model** - detection model to use (default `xlm_ud_detector`).
 - **Retry Count** - number of retries if processing fails.
 - **Poll Interval (Ms)** - how long to wait between status checks (default 2000 ms).
-- **Max Poll Attempts** - maximum number of status checks before timing out (default 30).
-- **Wait for Analysis** - keep polling until the deep analysis finishes (only relevant when Generate Analysis Details is enabled).
+- **Max Poll Attempts** - maximum number of status checks before giving up (default 30). If the core score is ready but the analysis is still processing when this budget runs out, the node returns the completed score rather than erroring.
 
 ### Image options
 
-- **Generate Analysis Details** - run a deep AI analysis (image tags, agreement, confidence, key indicators, reasoning, visual patterns, recommendations).
+- **Generate Analysis Details** - run a deep AI analysis (image tags, agreement, confidence, key indicators, reasoning, visual patterns, recommendations). When enabled, the node automatically keeps polling until the analysis finishes, so the result includes `analysis_results`.
 - **Generate Preview** - generate a preview image URL (default on).
 - **Generate Heatmap** - generate a heatmap of AI-generated regions, only produced for AI-classified images (default on).
 - **Heatmap Overlayed** - blend the heatmap onto the original image; when off, returns a transparent RGBA heatmap (only when Generate Heatmap is on).
 - **Heatmap Normalized** - normalize the heatmap activation map (only when Generate Heatmap is on).
 - **Model** - model or routing hint (default `generic`).
 - **Presigned URL Expiration (Seconds)** - lifetime of the upload URL (default 3600).
-- **Poll Interval (Ms)** / **Max Poll Attempts** - polling cadence and timeout (defaults 2000 ms / 30).
-- **Wait for Analysis** - keep polling until the deep analysis finishes (only relevant when Generate Analysis Details is enabled).
+- **Storage Base URL** - override the storage host used to build the detection URL (leave empty for the default production bucket).
+- **Poll Interval (Ms)** / **Max Poll Attempts** - polling cadence and budget (defaults 2000 ms / 30). If the core score is ready but the heatmap/analysis is still processing when the budget runs out, the node returns the completed score rather than erroring.
 - **Wait for Heatmap** - keep polling until the heatmap finishes generating (only relevant when Generate Heatmap is on and the image is AI-classified).
 
 ### Outputs

@@ -46,7 +46,7 @@ export const imageFields: INodeProperties[] = [
 		type: 'boolean',
 		default: false,
 		description:
-			'Whether to run a deep AI analysis (agreement, confidence, key indicators, reasoning, recommendations). Adds processing time.',
+			'Whether to run a deep AI analysis (image tags, agreement, confidence, key indicators, reasoning, visual patterns, recommendations). When enabled, the node keeps polling until the analysis finishes, so it adds processing time.',
 		displayOptions: {
 			show: {
 				resource: ['image'],
@@ -140,12 +140,13 @@ export const imageFields: INodeProperties[] = [
 				description: 'Lifetime of the presigned upload URL in seconds',
 			},
 			{
-				displayName: 'Wait for Analysis',
-				name: 'waitForAnalysis',
-				type: 'boolean',
-				default: false,
+				displayName: 'Storage Base URL',
+				name: 'storageBaseUrl',
+				type: 'string',
+				default: '',
+				placeholder: 'https://ai-image-detector-prod.nyc3.digitaloceanspaces.com',
 				description:
-					'Whether to keep polling until the deep analysis finishes. Only relevant when Generate Analysis Details is enabled.',
+					'Override the storage host used to build the detection URL from the uploaded file path. Leave empty to use the default production bucket.',
 			},
 			{
 				displayName: 'Wait for Heatmap',
