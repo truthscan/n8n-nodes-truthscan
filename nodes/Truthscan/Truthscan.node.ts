@@ -12,7 +12,7 @@ import { imageFields, imageOperations } from './descriptions/image.description';
 import { resourceProperty, textFields, textOperations } from './descriptions/text.description';
 import { detectText, pollUntilDone } from './transport';
 import {
-	buildObjectUrl,
+	buildDetectUrl,
 	detectImage,
 	getPresignedUrl,
 	pollImageUntilDone,
@@ -139,7 +139,8 @@ async function detectTextOperation(
 	return pollUntilDone.call(this, documentId, {
 		pollIntervalMs: (options.pollIntervalMs as number) ?? 2000,
 		maxPollAttempts: (options.maxPollAttempts as number) ?? 30,
-		waitForAnalysis: (options.waitForAnalysis as boolean) ?? false,
+		// Generating analysis implies waiting for it, so the result includes the details.
+		waitForAnalysis: generateAnalysisDetails,
 	});
 }
 
@@ -176,11 +177,22 @@ async function detectImageOperation(
 
 	await uploadToPresignedUrl.call(this, presignedUrl, buffer, contentType);
 
+	// The detect URL is the public storage URL built from file_path, NOT the upload
+	// proxy `presigned_url`. Fail clearly if we have nothing to build it from.
+	const detectUrl = buildDetectUrl(presigned, options.storageBaseUrl as string | undefined);
+	if (!presigned.file_path && !/^https?:\/\/.+\/.+/i.test(detectUrl)) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Truthscan did not return a file_path for the uploaded image, so the detection URL could not be built',
+			{ itemIndex: i },
+		);
+	}
+
 	const generateHeatmap = (options.generateHeatmap as boolean) ?? true;
 
 	const submitted = await detectImage.call(this, {
 		apiKey,
-		url: buildObjectUrl(presignedUrl),
+		url: detectUrl,
 		generatePreview: (options.generatePreview as boolean) ?? true,
 		generateAnalysisDetails,
 		generateHeatmap,
@@ -203,7 +215,8 @@ async function detectImageOperation(
 	return pollImageUntilDone.call(this, documentId, {
 		pollIntervalMs: (options.pollIntervalMs as number) ?? 2000,
 		maxPollAttempts: (options.maxPollAttempts as number) ?? 30,
-		waitForAnalysis: (options.waitForAnalysis as boolean) ?? false,
+		// Generating analysis implies waiting for it, so the result includes the details.
+		waitForAnalysis: generateAnalysisDetails,
 		waitForHeatmap: (options.waitForHeatmap as boolean) ?? false,
 	});
 }

@@ -54,29 +54,44 @@ export function resolveContentType(fileName: string, binaryMimeType?: string): s
 	return 'application/octet-stream';
 }
 
-/**
- * Build the public object URL that `/detect` fetches, derived from the presigned
- * URL we just uploaded to. We use the presigned URL's exact object key (minus the
- * query string) so `/detect` always points at the bytes we actually stored, and we
- * convert path-style (`host/bucket/key`) to virtual-hosted style (`bucket.host/key`).
- */
-export function buildObjectUrl(presignedUrl: string): string {
-	const url = new URL(presignedUrl);
-	const segments = url.pathname.replace(/^\/+/, '').split('/');
-	const bucket = segments.shift() ?? '';
-	const key = segments.join('/');
+/** DigitalOcean Spaces bucket that backs the production detect-image API. */
+export const TRUTHSCAN_STORAGE_BASE_URL =
+	'https://ai-image-detector-prod.nyc3.digitaloceanspaces.com';
 
-	if (!bucket || url.host.startsWith(`${bucket}.`)) {
-		return `${url.protocol}//${url.host}/${url.pathname.replace(/^\/+/, '')}`;
+/**
+ * Resolve the public object URL that `/detect` fetches.
+ *
+ * The `presigned_url` is an upload-only proxy endpoint (the object key lives in its
+ * query string), NOT the object's public location — so we must build the detect URL
+ * from `file_path` against the storage host, exactly as the Truthscan docs prescribe.
+ * If the presign response already exposes a full public URL, we prefer that.
+ */
+export function buildDetectUrl(
+	presignResponse: IDataObject,
+	storageBaseUrl: string = TRUTHSCAN_STORAGE_BASE_URL,
+): string {
+	for (const field of ['public_url', 'file_url', 'object_url', 'cdn_url']) {
+		const value = presignResponse[field];
+		if (typeof value === 'string' && /^https?:\/\//i.test(value)) {
+			return value;
+		}
 	}
-	return `${url.protocol}//${bucket}.${url.host}/${key}`;
+
+	const filePath = String(presignResponse.file_path ?? '').replace(/^\/+/, '');
+	const base = (storageBaseUrl || TRUTHSCAN_STORAGE_BASE_URL).replace(/\/+$/, '');
+	return `${base}/${filePath}`;
 }
 
 async function imageJsonRequest(
 	this: IExecuteFunctions,
 	method: IHttpRequestMethods,
 	endpoint: string,
-	options: { body?: IDataObject; qs?: IDataObject; headers?: IDataObject },
+	options: {
+		body?: IDataObject;
+		qs?: IDataObject;
+		headers?: IDataObject;
+		errorContext?: string;
+	},
 ): Promise<IDataObject> {
 	try {
 		return (await this.helpers.httpRequest({
@@ -88,7 +103,11 @@ async function imageJsonRequest(
 			json: true,
 		})) as IDataObject;
 	} catch (error) {
-		throw new NodeApiError(this.getNode(), error as JsonObject);
+		throw new NodeApiError(
+			this.getNode(),
+			error as JsonObject,
+			options.errorContext ? { description: options.errorContext } : undefined,
+		);
 	}
 }
 
@@ -175,7 +194,10 @@ export async function detectImage(
 		}
 	}
 
-	return imageJsonRequest.call(this, 'POST', '/detect', { body });
+	return imageJsonRequest.call(this, 'POST', '/detect', {
+		body,
+		errorContext: `Image URL sent to /detect: ${params.url}`,
+	});
 }
 
 /** Query the status/result of a previously submitted image document (no API key required). */
@@ -217,6 +239,9 @@ export async function pollImageUntilDone(
 	options: ImagePollOptions,
 ): Promise<IDataObject> {
 	let last: IDataObject = {};
+	// The most recent response whose core detection is finished, used as a fallback
+	// when only the asynchronous heatmap/analysis fails to settle within the budget.
+	let lastDone: IDataObject | undefined;
 
 	for (let attempt = 0; attempt < options.maxPollAttempts; attempt++) {
 		last = await queryImageDocument.call(this, id);
@@ -230,6 +255,7 @@ export async function pollImageUntilDone(
 		}
 
 		if (status === 'done') {
+			lastDone = last;
 			const heatmapReady = !options.waitForHeatmap || heatmapSettled(last);
 			const analysisReady = !options.waitForAnalysis || analysisSettled(last);
 			if (heatmapReady && analysisReady) {
@@ -238,6 +264,12 @@ export async function pollImageUntilDone(
 		}
 
 		await sleep(options.pollIntervalMs);
+	}
+
+	// Core detection finished but the heatmap/analysis kept us polling past the budget;
+	// return the completed result rather than discarding it, so the score is never lost.
+	if (lastDone) {
+		return lastDone;
 	}
 
 	throw new NodeApiError(this.getNode(), last as JsonObject, {

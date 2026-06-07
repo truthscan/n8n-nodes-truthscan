@@ -86,6 +86,9 @@ export async function pollUntilDone(
 	options: PollOptions,
 ): Promise<IDataObject> {
 	let last: IDataObject = {};
+	// The most recent response whose core detection is finished, used as a fallback
+	// when only the asynchronous analysis fails to settle within the attempt budget.
+	let lastDone: IDataObject | undefined;
 
 	for (let attempt = 0; attempt < options.maxPollAttempts; attempt++) {
 		last = await queryDocument.call(this, id);
@@ -99,12 +102,19 @@ export async function pollUntilDone(
 		}
 
 		if (status === 'done') {
+			lastDone = last;
 			if (!options.waitForAnalysis || analysisSettled(last)) {
 				return last;
 			}
 		}
 
 		await sleep(options.pollIntervalMs);
+	}
+
+	// Core detection finished but the analysis kept us polling past the budget; return
+	// the completed result rather than discarding it, so the score is never lost.
+	if (lastDone) {
+		return lastDone;
 	}
 
 	throw new NodeApiError(this.getNode(), last as JsonObject, {
