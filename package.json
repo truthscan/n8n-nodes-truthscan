@@ -17,7 +17,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/truthscan/n8n-nodes-truthscan.git"
+    "url": "git+https://github.com/truthscan/n8n-nodes-truthscan.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "n8n-node build",
