@@ -7,8 +7,19 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
+import { classifyResult } from './classification';
+import { imageFields, imageOperations } from './descriptions/image.description';
 import { resourceProperty, textFields, textOperations } from './descriptions/text.description';
 import { detectText, pollUntilDone } from './transport';
+import {
+	buildObjectUrl,
+	detectImage,
+	getPresignedUrl,
+	pollImageUntilDone,
+	resolveContentType,
+	sanitizeFileName,
+	uploadToPresignedUrl,
+} from './transport/image';
 
 export class Truthscan implements INodeType {
 	description: INodeTypeDescription = {
@@ -23,7 +34,10 @@ export class Truthscan implements INodeType {
 			name: 'Truthscan',
 		},
 		inputs: [NodeConnectionTypes.Main],
-		outputs: [NodeConnectionTypes.Main],
+		// Three outputs: AI-classified, Real-classified, and a Raw Output catch-all
+		// that always emits the unmodified API response for every processed item.
+		outputs: [NodeConnectionTypes.Main, NodeConnectionTypes.Main, NodeConnectionTypes.Main],
+		outputNames: ['AI', 'Real', 'Raw Output'],
 		usableAsTool: true,
 		credentials: [
 			{
@@ -31,12 +45,20 @@ export class Truthscan implements INodeType {
 				required: true,
 			},
 		],
-		properties: [resourceProperty, textOperations, ...textFields],
+		properties: [
+			resourceProperty,
+			textOperations,
+			...textFields,
+			imageOperations,
+			...imageFields,
+		],
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
-		const returnData: INodeExecutionData[] = [];
+		const aiItems: INodeExecutionData[] = [];
+		const realItems: INodeExecutionData[] = [];
+		const rawItems: INodeExecutionData[] = [];
 
 		const credentials = await this.getCredentials('truthscanApi');
 		const apiKey = credentials.apiKey as string;
@@ -46,7 +68,13 @@ export class Truthscan implements INodeType {
 				const resource = this.getNodeParameter('resource', i) as string;
 				const operation = this.getNodeParameter('operation', i) as string;
 
-				if (resource !== 'text' || operation !== 'detect') {
+				let result: IDataObject;
+
+				if (resource === 'text' && operation === 'detect') {
+					result = await detectTextOperation.call(this, i, apiKey);
+				} else if (resource === 'image' && operation === 'detect') {
+					result = await detectImageOperation.call(this, i, apiKey);
+				} else {
 					throw new NodeOperationError(
 						this.getNode(),
 						`The operation "${operation}" on resource "${resource}" is not supported`,
@@ -54,43 +82,20 @@ export class Truthscan implements INodeType {
 					);
 				}
 
-				const text = this.getNodeParameter('text', i) as string;
-				const generateAnalysisDetails = this.getNodeParameter(
-					'generateAnalysisDetails',
-					i,
-				) as boolean;
-				const options = this.getNodeParameter('options', i, {}) as IDataObject;
+				// Raw Output always receives the unmodified API response.
+				rawItems.push({ json: result, pairedItem: { item: i } });
 
-				const submitted = await detectText.call(this, {
-					text,
-					apiKey,
-					model: (options.model as string) ?? 'xlm_ud_detector',
-					retryCount: (options.retryCount as number) ?? 0,
-					generateAnalysisDetails,
-				});
-
-				const documentId = submitted.id as string | undefined;
-				if (!documentId) {
-					throw new NodeOperationError(
-						this.getNode(),
-						'Truthscan did not return a document id for the submitted text',
-						{ itemIndex: i },
-					);
-				}
-
-				const result = await pollUntilDone.call(this, documentId, {
-					pollIntervalMs: (options.pollIntervalMs as number) ?? 2000,
-					maxPollAttempts: (options.maxPollAttempts as number) ?? 30,
-					waitForAnalysis: (options.waitForAnalysis as boolean) ?? false,
-				});
-
-				returnData.push({
-					json: result,
+				// AI / Real receive the response enriched with a classification summary.
+				const classification = classifyResult(resource, result);
+				const enriched: INodeExecutionData = {
+					json: { ...result, classification },
 					pairedItem: { item: i },
-				});
+				};
+				(classification.isAI ? aiItems : realItems).push(enriched);
 			} catch (error) {
 				if (this.continueOnFail()) {
-					returnData.push({
+					// Errors flow through the Raw Output catch-all so they are not lost.
+					rawItems.push({
 						json: { error: (error as Error).message },
 						pairedItem: { item: i },
 					});
@@ -100,6 +105,105 @@ export class Truthscan implements INodeType {
 			}
 		}
 
-		return [returnData];
+		return [aiItems, realItems, rawItems];
 	}
+}
+
+/** Text detect: submit text to /detect, then poll /query until scored. */
+async function detectTextOperation(
+	this: IExecuteFunctions,
+	i: number,
+	apiKey: string,
+): Promise<IDataObject> {
+	const text = this.getNodeParameter('text', i) as string;
+	const generateAnalysisDetails = this.getNodeParameter('generateAnalysisDetails', i) as boolean;
+	const options = this.getNodeParameter('options', i, {}) as IDataObject;
+
+	const submitted = await detectText.call(this, {
+		text,
+		apiKey,
+		model: (options.model as string) ?? 'xlm_ud_detector',
+		retryCount: (options.retryCount as number) ?? 0,
+		generateAnalysisDetails,
+	});
+
+	const documentId = submitted.id as string | undefined;
+	if (!documentId) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Truthscan did not return a document id for the submitted text',
+			{ itemIndex: i },
+		);
+	}
+
+	return pollUntilDone.call(this, documentId, {
+		pollIntervalMs: (options.pollIntervalMs as number) ?? 2000,
+		maxPollAttempts: (options.maxPollAttempts as number) ?? 30,
+		waitForAnalysis: (options.waitForAnalysis as boolean) ?? false,
+	});
+}
+
+/** Image detect: presign upload URL, PUT the bytes, submit to /detect, then poll /query. */
+async function detectImageOperation(
+	this: IExecuteFunctions,
+	i: number,
+	apiKey: string,
+): Promise<IDataObject> {
+	const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i) as string;
+	const generateAnalysisDetails = this.getNodeParameter('generateAnalysisDetails', i) as boolean;
+	const options = this.getNodeParameter('options', i, {}) as IDataObject;
+
+	const binaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
+	const buffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
+
+	const fileName = sanitizeFileName(binaryData.fileName ?? `image-${i}`);
+	const contentType = resolveContentType(fileName, binaryData.mimeType);
+
+	const presigned = await getPresignedUrl.call(this, {
+		apiKey,
+		fileName,
+		expiration: options.expiration as number | undefined,
+	});
+
+	const presignedUrl = presigned.presigned_url as string | undefined;
+	if (!presignedUrl) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Truthscan did not return a presigned upload URL',
+			{ itemIndex: i },
+		);
+	}
+
+	await uploadToPresignedUrl.call(this, presignedUrl, buffer, contentType);
+
+	const generateHeatmap = (options.generateHeatmap as boolean) ?? true;
+
+	const submitted = await detectImage.call(this, {
+		apiKey,
+		url: buildObjectUrl(presignedUrl),
+		generatePreview: (options.generatePreview as boolean) ?? true,
+		generateAnalysisDetails,
+		generateHeatmap,
+		heatmapOverlayed: generateHeatmap ? ((options.heatmapOverlayed as boolean) ?? true) : undefined,
+		heatmapNormalized: generateHeatmap
+			? ((options.heatmapNormalized as boolean) ?? true)
+			: undefined,
+		model: (options.model as string) ?? 'generic',
+	});
+
+	const documentId = submitted.id as string | undefined;
+	if (!documentId) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Truthscan did not return a document id for the submitted image',
+			{ itemIndex: i },
+		);
+	}
+
+	return pollImageUntilDone.call(this, documentId, {
+		pollIntervalMs: (options.pollIntervalMs as number) ?? 2000,
+		maxPollAttempts: (options.maxPollAttempts as number) ?? 30,
+		waitForAnalysis: (options.waitForAnalysis as boolean) ?? false,
+		waitForHeatmap: (options.waitForHeatmap as boolean) ?? false,
+	});
 }

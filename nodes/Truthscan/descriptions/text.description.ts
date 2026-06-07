@@ -7,11 +7,16 @@ export const resourceProperty: INodeProperties = {
 	noDataExpression: true,
 	options: [
 		{
+			name: 'Image',
+			value: 'image',
+			description: 'Detect AI-generated images',
+		},
+		{
 			name: 'Text',
 			value: 'text',
 			description: 'Detect AI-generated text',
 		},
-		// Image, Video and Audio resources are planned and will be added here.
+		// Video and Audio resources are planned and will be added here.
 	],
 	default: 'text',
 };
